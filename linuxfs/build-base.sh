@@ -11,18 +11,20 @@
 # non-English locales, introspection data, or the base image's server and development tools.
 #   linuxfs/build-base.sh <workdir> <out.tar.zst>
 # Environment:
-#   TURNIP_URL   the "-Linux" Turnip zip to ship as the default driver (required)
+#   TURNIP_URL   optional "-Linux" Turnip zip to ship as the default driver. Set for Adreno
+#                runtimes; leave unset for the Mali runtime, whose default ICD is lavapipe
+#                (from vulkan-swrast) and whose display side uses the phone's own Mali driver.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 work="${1:?workdir}"
 out="${2:?output tar.zst}"
-: "${TURNIP_URL:?TURNIP_URL: the -Linux Turnip zip to ship as the default driver}"
+turnip_url="${TURNIP_URL:-}"
 mirror=http://mirror.archlinuxarm.org/aarch64
 base_url=http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz
 
 # The Steam session's closure. Bannerlator's list minus its own desktop bits (foot, pcmanfm,
 # ibus): DroidDeck's Desktop package brings a desktop of its own.
-seeds=(gamescope mesa vulkan-freedreno xorg-xwayland xorg-xhost xorg-xrandr vulkan-tools wayland-utils
+seeds=(gamescope mesa vulkan-freedreno vulkan-swrast xorg-xwayland xorg-xhost xorg-xrandr vulkan-tools wayland-utils
   mesa-utils unzip dbus libpulse pulseaudio pulseaudio-alsa alsa-lib nss libnm curl ca-certificates
   fontconfig freetype2 bash coreutils grep sed gawk which findutils glib2 libglvnd libxcomposite
   libxdamage libxrandr wayland wayland-protocols libxcb libxshmfence xkeyboard-config xorg-xkbcomp
@@ -157,6 +159,30 @@ rm -rf rootfs/usr/lib/python3.*/{test,tests,idlelib,tkinter,ensurepip,turtledemo
 find rootfs/usr/lib/python3.* -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
 echo "trimmed: $(du -sm rootfs | cut -f1) MB"
 
+# --- the default Vulkan ICD ----------------------------------------------------------------
+# Adreno: the shipped Turnip. Mali: no Turnip - the default is lavapipe, which vulkan-swrast
+# installs as /usr/share/vulkan/icd.d/lvp_icd.aarch64.json. Either way the runtime's own ICD is
+# what a session uses when the app has not handed it an imported Linux driver.
+if [ -n "$turnip_url" ]; then
+  curl -fsSL --retry 6 --retry-delay 5 --retry-all-errors -o turnip.zip "$turnip_url"
+  rm -rf turnip && mkdir turnip && (cd turnip && unzip -q ../turnip.zip)
+  install -m 755 turnip/libvulkan_freedreno.so rootfs/usr/lib/libvulkan_freedreno.so
+  mkdir -p rootfs/usr/share/vulkan/icd.d
+  printf '{\n    "ICD": {\n        "api_version": "1.4.0",\n        "library_path": "/usr/lib/libvulkan_freedreno.so"\n    },\n    "file_format_version": "1.0.0"\n}\n' \
+    > rootfs/usr/share/vulkan/icd.d/freedreno_icd.json
+  # Only manifests may live in icd.d: the app takes any .json there as the driver to load.
+  cp turnip/meta.json rootfs/usr/share/vulkan/freedreno-driver-meta.json 2>/dev/null || true
+  echo "default ICD: Turnip (freedreno_icd.json)"
+else
+  # Keep only lavapipe as the default device: a freedreno ICD with no DRM node would make the
+  # loader enumerate a dead physical device first.
+  rm -f rootfs/usr/share/vulkan/icd.d/freedreno_icd.json
+  lvp=$(ls rootfs/usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -1 || true)
+  [ -n "$lvp" ] || { echo "no default ICD: vulkan-swrast did not install lvp_icd*.json" >&2; exit 1; }
+  echo "default ICD: lavapipe ($(basename "$lvp"))"
+fi
+rm -f rootfs/usr/share/vulkan/icd.d/nvidia_icd.json
+
 # --- the client's GTK 2 and Proton's media libraries (as in Bannerlator's builder) --------------
 gtk2_deb=libgtk2.0-0t64_2.24.33-7_arm64.deb
 gtk2_sha=28b2f1622197443f07f25a93e03db1a964184946ac12f501b8221c895026d0ca
@@ -187,17 +213,6 @@ for so in rootfs/usr/lib/libnettle.so.8.* rootfs/usr/lib/libtheoradec.so.1.* roo
   ln -sfn "$base" "rootfs/usr/lib/$(echo "$base" | sed -E 's/(\.so\.[0-9]+).*/\1/')"
 done
 ls -l rootfs/usr/lib/libnettle.so.8 rootfs/usr/lib/libtheoradec.so.1 rootfs/usr/lib/libvpx.so.9
-
-# --- the default Vulkan driver: Banners-Turnip's Linux build ------------------------------------
-curl -fsSL --retry 6 --retry-delay 5 --retry-all-errors -o turnip.zip "$TURNIP_URL"
-rm -rf turnip && mkdir turnip && (cd turnip && unzip -q ../turnip.zip)
-install -m 755 turnip/libvulkan_freedreno.so rootfs/usr/lib/libvulkan_freedreno.so
-mkdir -p rootfs/usr/share/vulkan/icd.d
-printf '{\n    "ICD": {\n        "api_version": "1.4.0",\n        "library_path": "/usr/lib/libvulkan_freedreno.so"\n    },\n    "file_format_version": "1.0.0"\n}\n' \
-  > rootfs/usr/share/vulkan/icd.d/freedreno_icd.json
-rm -f rootfs/usr/share/vulkan/icd.d/nvidia_icd.json
-# Only manifests may live in icd.d: the app takes any .json there as the driver to load.
-cp turnip/meta.json rootfs/usr/share/vulkan/freedreno-driver-meta.json 2>/dev/null || true
 
 # --- the runtime's own proot, and what Xwayland and Steam expect of a system -------------------
 mkdir -p rootfs/opt/android-host
