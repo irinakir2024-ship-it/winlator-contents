@@ -5,8 +5,8 @@
   "name": "Linux runtime (Mali - lavapipe + gamescope)",
   "version": "mali-r0",
   "url": "https://github.com/irinakir2024-ship-it/winlator-contents/releases/download/linuxfs-mali-r0/linuxfs.tar.zst",
-  "sha256": "",
-  "size": 0,
-  "file_size": 0,
-  "note": "Mali build: Mesa + vulkan-swrast (lavapipe) as default ICD for runtime. Display uses the phone's own Mali driver. Built for the Mali fork of DroidDeck."
+  "sha256": "7c5cad2d88e492d7e377a5c41c08f7ec91e565fb651d97b80f30e61eeb12c1b3",
+  "size": 606406084,
+  "file_size": 606406084,
+  "note": "Mali build: Mesa + vulkan-swrast (lavapipe) as the default Vulkan ICD for the runtime; the freedreno/Turnip ICD is removed. The gamescope session and Proton games render on the CPU (software Vulkan), which is slow but boots on any GPU. The on-screen compositor stays the phone's own Mali Vulkan driver. Built by build-linuxfs.yml with turnip_url empty for the Mali fork of DroidDeck."
 }
