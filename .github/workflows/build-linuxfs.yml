@@ -10,9 +10,9 @@ on:
         required: true
         default: "r10"
       turnip_url:
-        description: "URL of the -Linux Turnip zip to ship as the default driver"
-        required: true
-        default: "https://github.com/The412Banner/winlator-contents/releases/download/linuxfs-r10-test/Turnip-test-61f259049c-regular-Linux.zip"
+        description: "URL of the -Linux Turnip zip to ship as the default driver (empty = Mali build, lavapipe default)"
+        required: false
+        default: ""
       release:
         description: "Release tag to attach linuxfs.tar.zst to (empty = artifact only)"
         required: false

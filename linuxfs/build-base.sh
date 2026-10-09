@@ -172,15 +172,18 @@ if [ -n "$turnip_url" ]; then
     > rootfs/usr/share/vulkan/icd.d/freedreno_icd.json
   # Only manifests may live in icd.d: the app takes any .json there as the driver to load.
   cp turnip/meta.json rootfs/usr/share/vulkan/freedreno-driver-meta.json 2>/dev/null || true
+  vk_lib=/usr/lib/libvulkan_freedreno.so
   echo "default ICD: Turnip (freedreno_icd.json)"
 else
-  # Keep only lavapipe as the default device: a freedreno ICD with no DRM node would make the
-  # loader enumerate a dead physical device first.
-  rm -f rootfs/usr/share/vulkan/icd.d/freedreno_icd.json
+  # Keep only lavapipe as the default device: the vulkan-freedreno package's own manifests and
+  # library would otherwise make the loader enumerate a freedreno device with no DRM node here.
+  rm -f rootfs/usr/share/vulkan/icd.d/freedreno_icd*.json rootfs/usr/lib/libvulkan_freedreno.so
   lvp=$(ls rootfs/usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -1 || true)
   [ -n "$lvp" ] || { echo "no default ICD: vulkan-swrast did not install lvp_icd*.json" >&2; exit 1; }
+  vk_lib=/usr/lib/libvulkan_lvp.so
   echo "default ICD: lavapipe ($(basename "$lvp"))"
 fi
+export vk_lib
 rm -f rootfs/usr/share/vulkan/icd.d/nvidia_icd.json
 
 # --- the client's GTK 2 and Proton's media libraries (as in Bannerlator's builder) --------------
@@ -243,10 +246,11 @@ proot -q "$(command -v qemu-aarch64-static)" -r rootfs -w / -b /dev -b /proc /bi
   ldconfig -r / >/dev/null 2>&1 || true
 ' || echo "post-install hooks under qemu: best effort"
 echo "final: $(du -sm rootfs | cut -f1) MB"
-for f in usr/bin/gamescope usr/bin/Xwayland usr/lib/libvulkan_freedreno.so usr/lib/libgtk-x11-2.0.so.0 \
+for f in usr/bin/gamescope usr/bin/Xwayland usr/lib/libgtk-x11-2.0.so.0 \
          usr/bin/pulseaudio usr/bin/python3 opt/android-host/proot usr/lib/libnettle.so.8 usr/local/bin/bannerlator-session; do
   [ -e "rootfs/$f" ] || { echo "MISSING from rootfs: $f" >&2; exit 1; }
 done
+[ -e "rootfs$vk_lib" ] || { echo "MISSING from rootfs: $vk_lib" >&2; exit 1; }
 # Every program and library must resolve all of its DT_NEEDED libraries inside the rootfs. A
 # dropped package can take a library something else still links (e2fsprogs' libcom_err is needed
 # by krb5, which Xwayland reaches through libtirpc) and the failure only shows on a device as a
@@ -269,7 +273,7 @@ proot -q "$(command -v qemu-aarch64-static)" -r rootfs -w / -b /dev -b /proc /bi
   # The session cannot start without these; anything else unresolved is dead weight, not a fault.
   fail=0
   for f in /usr/bin/Xwayland /usr/bin/xkbcomp /usr/bin/gamescope /usr/bin/curl /usr/bin/python3 /usr/bin/pulseaudio /usr/bin/unzip \
-           /usr/bin/bash /usr/bin/tar /usr/bin/zstd /usr/bin/sha256sum /usr/bin/find /usr/bin/gawk /usr/lib/libvulkan_freedreno.so \
+           /usr/bin/bash /usr/bin/tar /usr/bin/zstd /usr/bin/sha256sum /usr/bin/find /usr/bin/gawk $vk_lib \
            /usr/lib/libcurl.so.4 /usr/lib/libgtk-3.so.0 /usr/lib/libgtk-x11-2.0.so.0 /usr/lib/libnettle.so.8 /usr/lib/libpulse.so.0 \
            /usr/lib/libibus-1.0.so.5 /usr/lib/libva.so.2 /usr/lib/libva-drm.so.2 /usr/lib/libva-x11.so.2; do
     [ -f "$f" ] || { echo "REQUIRED FILE MISSING: $f"; fail=1; continue; }
